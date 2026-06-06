@@ -75,6 +75,35 @@ export async function updateBusinessHours(
   }));
 }
 
+export async function getBlockedTimeSlots() {
+  const slots = await prisma.blockedTimeSlot.findMany({ orderBy: [{ date: "asc" }, { startTime: "asc" }] });
+  return slots.map((s) => ({
+    id: s.id,
+    date: format(s.date, "yyyy-MM-dd"),
+    startTime: s.startTime,
+    endTime: s.endTime,
+    reason: s.reason,
+  }));
+}
+
+export async function blockTimeSlot(date: string, startTime: string, endTime: string, reason?: string) {
+  const blocked = await prisma.blockedTimeSlot.create({
+    data: { date: startOfDay(parseISO(date)), startTime, endTime, reason },
+  });
+  return {
+    id: blocked.id,
+    date: format(blocked.date, "yyyy-MM-dd"),
+    startTime: blocked.startTime,
+    endTime: blocked.endTime,
+    reason: blocked.reason,
+  };
+}
+
+export async function unblockTimeSlot(id: string) {
+  await prisma.blockedTimeSlot.delete({ where: { id } });
+  return { message: "Time slot unblocked" };
+}
+
 export async function markBookingCompleted(reference: string) {
   const booking = await prisma.booking.findUnique({
     where: { reference: reference.toUpperCase() },

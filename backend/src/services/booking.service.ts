@@ -6,12 +6,13 @@ import { AppError } from "../lib/errors.js";
 import { calculateDeposit, penceToPounds } from "../utils/money.js";
 import { generateBookingReference } from "../utils/reference.js";
 import { getAvailableSlots } from "./availability.service.js";
-import { sendBookingConfirmation } from "./email.service.js";
+import { sendBookingConfirmation, sendCancellationEmail } from "./email.service.js";
 import {
   createDepositConfirmedNotification,
   createBookingCancelledNotification,
   createBookingRescheduledNotification,
 } from "./notification.service.js";
+import { createAdminNotification } from "./admin-notification.service.js";
 
 interface CreateBookingInput {
   serviceId: string;
@@ -123,6 +124,14 @@ export async function createBooking(input: CreateBookingInput) {
     clientSecret = paymentIntent.client_secret;
   }
 
+  await createAdminNotification({
+    type: "NEW_BOOKING",
+    title: "New booking received",
+    message: `${reference} — ${service.name} on ${input.date} at ${input.time}`,
+    bookingId: booking.id,
+    linkPath: `/admin?section=appointments&ref=${reference}`,
+  });
+
   return {
     booking: formatBookingResponse(booking),
     payment: {
@@ -185,6 +194,14 @@ export async function confirmBookingPayment(paymentIntentId: string) {
       penceToPounds(updated.depositPence)
     );
   }
+
+  await createAdminNotification({
+    type: "DEPOSIT_CONFIRMED",
+    title: "Deposit confirmed",
+    message: `${penceToPounds(updated.depositPence)} received for ${updated.reference}`,
+    bookingId: updated.id,
+    linkPath: `/admin?section=payments`,
+  });
 
   return { booking: formatBookingResponse(updated), alreadyConfirmed: false };
 }
@@ -272,6 +289,16 @@ export async function cancelBooking(
       updated.reference
     );
   }
+
+  await createAdminNotification({
+    type: eligibleForRefund ? "BOOKING_CANCELLED" : "LATE_CANCELLATION",
+    title: eligibleForRefund ? "Booking cancelled" : "Late cancellation (no refund)",
+    message: `${updated.reference} cancelled by client`,
+    bookingId: updated.id,
+    linkPath: `/admin?section=appointments&ref=${updated.reference}`,
+  });
+
+  await sendCancellationEmail(updated);
 
   return {
     booking: formatBookingResponse(updated),

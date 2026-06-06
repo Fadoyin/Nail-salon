@@ -1,4 +1,4 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
+export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 
 class ApiError extends Error {
   constructor(
@@ -201,20 +201,90 @@ export const api = {
       { method: "POST", body: JSON.stringify({ email, password }) }
     ),
 
-  adminGetStats: (token: string) => request("/api/admin/stats", {}, token),
+  adminGetOverview: (token: string) => request<AdminOverview>("/api/admin/overview", {}, token),
 
-  adminGetBookings: (token: string, status?: string) =>
-    request<{ bookings: AdminBooking[] }>(
-      `/api/admin/bookings${status ? `?status=${status}` : ""}`,
-      {},
+  adminGetAppointments: (token: string, params?: Record<string, string>) => {
+    const q = params ? "?" + new URLSearchParams(params).toString() : "";
+    return request<{ bookings: AdminBooking[] }>(`/api/admin/appointments${q}`, {}, token);
+  },
+
+  adminManualBooking: (token: string, body: Record<string, unknown>) =>
+    request("/api/admin/appointments/manual", { method: "POST", body: JSON.stringify(body) }, token),
+
+  adminUpdateAppointmentStatus: (token: string, reference: string, status: string) =>
+    request(`/api/admin/appointments/${reference}/status`, { method: "PATCH", body: JSON.stringify({ status }) }, token),
+
+  adminUpdateAppointmentNotes: (token: string, reference: string, internalNotes: string) =>
+    request(`/api/admin/appointments/${reference}/notes`, { method: "PATCH", body: JSON.stringify({ internalNotes }) }, token),
+
+  adminRescheduleAppointment: (token: string, reference: string, date: string, time: string) =>
+    request(`/api/admin/appointments/${reference}/reschedule`, { method: "POST", body: JSON.stringify({ date, time }) }, token),
+
+  adminCancelAppointment: (token: string, reference: string, reason?: string) =>
+    request(`/api/admin/appointments/${reference}/cancel`, { method: "POST", body: JSON.stringify({ reason }) }, token),
+
+  adminCompleteBooking: (token: string, reference: string) =>
+    request(`/api/admin/appointments/${reference}/complete`, { method: "PATCH" }, token),
+
+  adminGetClients: (token: string, search?: string, sortBy?: string) => {
+    const params = new URLSearchParams();
+    if (search) params.set("search", search);
+    if (sortBy) params.set("sortBy", sortBy);
+    const q = params.toString() ? `?${params}` : "";
+    return request<{ clients: AdminClient[] }>(`/api/admin/clients${q}`, {}, token);
+  },
+
+  adminGetClient: (token: string, id: string) =>
+    request<{ client: AdminClientDetail }>(`/api/admin/clients/${id}`, {}, token),
+
+  adminUpdateClientNotes: (token: string, id: string, internalNotes: string) =>
+    request(`/api/admin/clients/${id}/notes`, { method: "PATCH", body: JSON.stringify({ internalNotes }) }, token),
+
+  adminGetPaymentsOverview: (token: string) => request<AdminPaymentsOverview>("/api/admin/payments/overview", {}, token),
+
+  adminGetPayments: (token: string, params?: Record<string, string>) => {
+    const q = params ? "?" + new URLSearchParams(params).toString() : "";
+    return request<{ payments: AdminPayment[] }>(`/api/admin/payments${q}`, {}, token);
+  },
+
+  adminIssueRefund: (token: string, reference: string, amountPence?: number, reason?: string) =>
+    request<{ reference: string; refundFormatted: string; message: string }>(
+      `/api/admin/payments/${reference}/refund`,
+      { method: "POST", body: JSON.stringify({ amountPence, reason }) },
       token
     ),
 
+  adminExportPayments: (token: string, dateFrom?: string, dateTo?: string) => {
+    const params = new URLSearchParams();
+    if (dateFrom) params.set("dateFrom", dateFrom);
+    if (dateTo) params.set("dateTo", dateTo);
+    return fetch(`${API_URL}/api/admin/payments/export?${params}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    }).then((r) => r.text());
+  },
+
+  adminExportPaymentsPdf: async (token: string, dateFrom?: string, dateTo?: string) => {
+    const params = new URLSearchParams();
+    if (dateFrom) params.set("dateFrom", dateFrom);
+    if (dateTo) params.set("dateTo", dateTo);
+    const res = await fetch(`${API_URL}/api/admin/payments/export/pdf?${params}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) throw new ApiError("Export failed", res.status);
+    return res.blob();
+  },
+
+  adminGetNotifications: (token: string) =>
+    request<{ notifications: AdminNotification[]; unreadCount: number }>("/api/admin/notifications", {}, token),
+
+  adminMarkNotificationRead: (token: string, id: string) =>
+    request(`/api/admin/notifications/${id}/read`, { method: "PATCH" }, token),
+
+  adminMarkAllNotificationsRead: (token: string) =>
+    request("/api/admin/notifications/read-all", { method: "PATCH" }, token),
+
   adminBlockDate: (token: string, date: string, reason?: string) =>
-    request("/api/admin/availability/blocked", {
-      method: "POST",
-      body: JSON.stringify({ date, reason }),
-    }, token),
+    request("/api/admin/availability/blocked", { method: "POST", body: JSON.stringify({ date, reason }) }, token),
 
   adminUnblockDate: (token: string, id: string) =>
     request(`/api/admin/availability/blocked/${id}`, { method: "DELETE" }, token),
@@ -222,33 +292,165 @@ export const api = {
   adminGetBlockedDates: (token: string) =>
     request<{ blockedDates: BlockedDate[] }>("/api/admin/availability/blocked", {}, token),
 
+  adminGetBlockedSlots: (token: string) =>
+    request<{ blockedSlots: BlockedTimeSlot[] }>("/api/admin/availability/blocked-slots", {}, token),
+
+  adminBlockTimeSlot: (token: string, date: string, startTime: string, endTime: string, reason?: string) =>
+    request("/api/admin/availability/blocked-slots", { method: "POST", body: JSON.stringify({ date, startTime, endTime, reason }) }, token),
+
+  adminUnblockTimeSlot: (token: string, id: string) =>
+    request(`/api/admin/availability/blocked-slots/${id}`, { method: "DELETE" }, token),
+
   adminGetHours: (token: string) =>
     request<{ hours: BusinessHour[] }>("/api/admin/availability/hours", {}, token),
 
   adminUpdateHours: (token: string, hours: BusinessHour[]) =>
-    request("/api/admin/availability/hours", {
-      method: "PUT",
-      body: JSON.stringify({ hours }),
-    }, token),
+    request("/api/admin/availability/hours", { method: "PUT", body: JSON.stringify({ hours }) }, token),
 
-  adminCompleteBooking: (token: string, reference: string) =>
-    request(`/api/admin/bookings/${reference}/complete`, { method: "PATCH" }, token),
+  adminGetAvailabilitySettings: (token: string) =>
+    request<{ bufferMinutes: number; leadTimeHours: number }>("/api/admin/availability/settings", {}, token),
+
+  adminUpdateAvailabilitySettings: (token: string, bufferMinutes: number, leadTimeHours: number) =>
+    request("/api/admin/availability/settings", { method: "PUT", body: JSON.stringify({ bufferMinutes, leadTimeHours }) }, token),
+
+  adminGetSettings: (token: string) => request<AdminSettings>("/api/admin/settings", {}, token),
+
+  adminUpdateProfile: (token: string, body: Record<string, unknown>) =>
+    request("/api/admin/settings/profile", { method: "PATCH", body: JSON.stringify(body) }, token),
+
+  adminUpdateBusinessSettings: (token: string, body: Record<string, unknown>) =>
+    request("/api/admin/settings/business", { method: "PATCH", body: JSON.stringify(body) }, token),
+
+  adminUpdateEmailTemplates: (token: string, body: Record<string, unknown>) =>
+    request("/api/admin/settings/email-templates", { method: "PATCH", body: JSON.stringify(body) }, token),
+
+  adminUploadLogo: async (token: string, file: File) => {
+    const form = new FormData();
+    form.append("logo", file);
+    const res = await fetch(`${API_URL}/api/admin/settings/logo`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body: form,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new ApiError(data.error ?? "Upload failed", res.status);
+    return data as { logoUrl: string };
+  },
+
+  adminGetServices: () => request<{ services: { category: string; categoryLabel: string; services: { id: string; name: string; priceFormatted: string }[] }[] }>("/api/services"),
 };
+
+export interface AdminOverview {
+  stats: Record<string, string | number>;
+  todaySchedule: {
+    reference: string;
+    clientName: string;
+    service: string;
+    time: string;
+    depositFormatted: string;
+    depositPaid: boolean;
+    status: string;
+  }[];
+}
 
 export interface AdminBooking {
   id: string;
   reference: string;
   status: string;
   clientName: string;
+  firstName?: string;
+  lastName?: string;
   email: string;
   phone: string;
   serviceName: string;
+  serviceId?: string;
   appointmentDate: string;
   appointmentTime: string;
   totalFormatted: string;
   depositFormatted: string;
+  remainingFormatted?: string;
   depositPaidAt: string | null;
-  hasAccount: boolean;
+  internalNotes?: string | null;
+  isManualBooking?: boolean;
+  userId?: string | null;
+  durationMin?: number;
+}
+
+export interface AdminClient {
+  id: string;
+  fullName: string;
+  email: string;
+  phone: string;
+  bookingCount: number;
+  totalSpentFormatted: string;
+  lastVisit: string | null;
+  internalNotes: string | null;
+}
+
+export interface AdminClientDetail extends AdminClient {
+  createdAt: string;
+  bookings: { reference: string; service: string; date: string; time: string; totalFormatted: string; status: string }[];
+}
+
+export interface AdminPaymentsOverview {
+  revenueWeekFormatted: string;
+  revenueMonthFormatted: string;
+  revenueAllTimeFormatted: string;
+  depositsCollectedFormatted: string;
+  outstandingFormatted: string;
+  refundsIssuedFormatted: string;
+}
+
+export interface AdminPayment {
+  reference: string;
+  client: string;
+  service: string;
+  date: string;
+  totalFormatted: string;
+  depositFormatted: string;
+  remainingFormatted: string;
+  refundFormatted: string | null;
+  depositPence?: number;
+  refundPence?: number;
+  status: string;
+  paymentStatus: string;
+}
+
+export interface AdminNotification {
+  id: string;
+  type: string;
+  title: string;
+  message: string;
+  read: boolean;
+  linkPath: string | null;
+  createdAt: string;
+}
+
+export interface BlockedTimeSlot {
+  id: string;
+  date: string;
+  startTime: string;
+  endTime: string;
+  reason: string | null;
+}
+
+export interface EmailTemplate {
+  subject: string;
+  body: string;
+}
+
+export interface AdminSettings {
+  profile: { id: string; name: string; email: string };
+  business: Record<string, string | null>;
+  booking: { depositPercentage: number; cancellationHours: number; bufferMinutes: number; leadTimeHours: number };
+  email: Record<string, boolean>;
+  templates: {
+    bookingConfirm: EmailTemplate;
+    reminder: EmailTemplate;
+    review: EmailTemplate;
+    cancellation: EmailTemplate;
+  };
+  placeholderHint: string;
 }
 
 export interface BlockedDate {

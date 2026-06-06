@@ -3,6 +3,8 @@ import type { Booking, BookingService, BookingAddOn, Service } from "@prisma/cli
 import { config, CANCELLATION_POLICY } from "../config.js";
 import { penceToPounds } from "../utils/money.js";
 import { format } from "date-fns";
+import { getSalonSettings } from "./salon-settings.service.js";
+import { resolveTemplate } from "./email-templates.service.js";
 
 type BookingWithRelations = Booking & {
   services: (BookingService & { service: Service })[];
@@ -31,99 +33,120 @@ function formatAppointmentDate(date: Date): string {
   return format(date, "EEEE, d MMMM yyyy");
 }
 
-function buildBookingSummaryHtml(booking: BookingWithRelations): string {
+function buildBookingVars(booking: BookingWithRelations, salon: Awaited<ReturnType<typeof getSalonSettings>>) {
   const serviceLines = booking.services
     .map((s) => `<li>${s.service.name} — ${penceToPounds(s.pricePence)}</li>`)
     .join("");
-
   const addOnLines = booking.addOns
     .map((a) => `<li>${a.service.name} — ${penceToPounds(a.pricePence)}</li>`)
     .join("");
+  const servicesPlain = [
+    ...booking.services.map((s) => s.service.name),
+    ...booking.addOns.map((a) => a.service.name),
+  ].join(", ");
 
-  return `
-    <div style="font-family: Georgia, serif; max-width: 600px; margin: 0 auto; color: #333;">
-      <div style="background: linear-gradient(135deg, #fce4ec, #f8bbd9); padding: 32px; text-align: center; border-radius: 8px 8px 0 0;">
-        <h1 style="color: #c2185b; margin: 0; font-size: 28px;">Dollhouse Lounge 🌸</h1>
-        <p style="color: #880e4f; margin: 8px 0 0;">You're booked & paid!</p>
-      </div>
-      <div style="padding: 32px; background: #fff; border: 1px solid #f8bbd9;">
-        <p>Dear ${booking.firstName},</p>
-        <p>Thank you for booking with Dollhouse Lounge. Your appointment is confirmed!</p>
-
-        <div style="background: #fce4ec; padding: 20px; border-radius: 8px; margin: 24px 0;">
-          <h2 style="color: #c2185b; margin-top: 0; font-size: 18px;">Booking Reference: ${booking.reference}</h2>
-          <p><strong>Date:</strong> ${formatAppointmentDate(booking.appointmentDate)}</p>
-          <p><strong>Time:</strong> ${booking.appointmentTime}</p>
-          <p><strong>Services:</strong></p>
-          <ul>${serviceLines}</ul>
-          ${addOnLines ? `<p><strong>Add-ons:</strong></p><ul>${addOnLines}</ul>` : ""}
-        </div>
-
-        <div style="background: #fff3f8; padding: 20px; border-radius: 8px; margin: 24px 0;">
-          <h3 style="color: #c2185b; margin-top: 0;">Payment Summary</h3>
-          <p><strong>Total:</strong> ${penceToPounds(booking.totalPence)}</p>
-          <p><strong>Deposit paid today:</strong> ${penceToPounds(booking.depositPence)}</p>
-          <p><strong>Remaining on the day:</strong> ${penceToPounds(booking.remainingPence)}</p>
-        </div>
-
-        <div style="background: #fafafa; padding: 20px; border-radius: 8px; margin: 24px 0; border-left: 4px solid #e91e63;">
-          <h3 style="color: #c2185b; margin-top: 0;">Cancellation Policy</h3>
-          <pre style="white-space: pre-wrap; font-family: inherit; font-size: 14px; line-height: 1.6;">${CANCELLATION_POLICY}</pre>
-        </div>
-
-        <p>We can't wait to see you! If you have any questions, simply reply to this email.</p>
-
-        <div style="text-align: center; margin-top: 32px;">
-          <a href="${config.trustpilotUrl}" style="display: inline-block; background: #e91e63; color: white; padding: 12px 24px; border-radius: 24px; text-decoration: none; font-weight: bold;">
-            Leave us a review on Trustpilot ⭐
-          </a>
-        </div>
-      </div>
-      <div style="text-align: center; padding: 16px; color: #999; font-size: 12px;">
-        © 2026 Dollhouse Lounge
-      </div>
-    </div>
-  `;
+  return {
+    firstName: booking.firstName,
+    reference: booking.reference,
+    date: formatAppointmentDate(booking.appointmentDate),
+    time: booking.appointmentTime,
+    services: serviceLines,
+    addOns: addOnLines,
+    addOnsSection: addOnLines
+      ? `<p><strong>Add-ons:</strong></p><ul>${addOnLines}</ul>`
+      : "",
+    servicesPlain,
+    total: penceToPounds(booking.totalPence),
+    deposit: penceToPounds(booking.depositPence),
+    remaining: penceToPounds(booking.remainingPence),
+    cancellationPolicy: CANCELLATION_POLICY,
+    trustpilotUrl: salon.trustpilotUrl || config.trustpilotUrl,
+    businessName: salon.businessName,
+    contactEmail: salon.contactEmail,
+  };
 }
 
 export async function sendBookingConfirmation(booking: BookingWithRelations): Promise<boolean> {
+  const salon = await getSalonSettings();
+  if (!salon.emailBookingConfirm) return false;
+
   const transport = getTransporter();
   if (!transport) {
     console.warn("Email not configured — skipping confirmation email for", booking.reference);
     return false;
   }
 
-  const html = buildBookingSummaryHtml(booking);
+  const vars = buildBookingVars(booking, salon);
+  const { subject, html } = resolveTemplate(salon, "bookingConfirm", vars);
 
   await transport.sendMail({
     from: config.email.from,
     to: booking.email,
-    subject: `Booking Confirmed — ${booking.reference} | Dollhouse Lounge 🌸`,
+    subject,
     html,
-    text: `Your appointment at Dollhouse Lounge is confirmed!\n\nReference: ${booking.reference}\nDate: ${formatAppointmentDate(booking.appointmentDate)}\nTime: ${booking.appointmentTime}\nDeposit paid: ${penceToPounds(booking.depositPence)}\nRemaining: ${penceToPounds(booking.remainingPence)}\n\n${CANCELLATION_POLICY}`,
+    text: `Your appointment at ${salon.businessName} is confirmed!\n\nReference: ${booking.reference}\nDate: ${vars.date}\nTime: ${booking.appointmentTime}\nDeposit paid: ${vars.deposit}\nRemaining: ${vars.remaining}\n\n${CANCELLATION_POLICY}`,
+  });
+
+  return true;
+}
+
+export async function sendAppointmentReminder(booking: BookingWithRelations): Promise<boolean> {
+  const salon = await getSalonSettings();
+  if (!salon.emailReminder) return false;
+
+  const transport = getTransporter();
+  if (!transport) return false;
+
+  const vars = buildBookingVars(booking, salon);
+  const { subject, html } = resolveTemplate(salon, "reminder", vars);
+
+  await transport.sendMail({
+    from: config.email.from,
+    to: booking.email,
+    subject,
+    html,
+    text: `Reminder: ${vars.date} at ${booking.appointmentTime} — ${booking.reference}`,
   });
 
   return true;
 }
 
 export async function sendReviewRequest(booking: BookingWithRelations): Promise<boolean> {
+  const salon = await getSalonSettings();
+  if (!salon.emailReviewRequest) return false;
+
   const transport = getTransporter();
   if (!transport) return false;
+
+  const vars = buildBookingVars(booking, salon);
+  const { subject, html } = resolveTemplate(salon, "review", vars);
 
   await transport.sendMail({
     from: config.email.from,
     to: booking.email,
-    subject: "How was your visit? — Dollhouse Lounge 🌸",
-    html: `
-      <div style="font-family: Georgia, serif; max-width: 600px; margin: 0 auto;">
-        <h1 style="color: #c2185b;">Thank you, ${booking.firstName}! 🌸</h1>
-        <p>We hope you loved your visit to Dollhouse Lounge.</p>
-        <p>We'd be so grateful if you could share your experience on Trustpilot — it helps other clients find us!</p>
-        <a href="${config.trustpilotUrl}" style="display: inline-block; background: #e91e63; color: white; padding: 12px 24px; border-radius: 24px; text-decoration: none;">
-          Leave a Review ⭐
-        </a>
-      </div>
-    `,
+    subject,
+    html,
+  });
+
+  return true;
+}
+
+export async function sendCancellationEmail(booking: BookingWithRelations): Promise<boolean> {
+  const salon = await getSalonSettings();
+  if (!salon.emailCancellation) return false;
+
+  const transport = getTransporter();
+  if (!transport) return false;
+
+  const vars = buildBookingVars(booking, salon);
+  const { subject, html } = resolveTemplate(salon, "cancellation", vars);
+
+  await transport.sendMail({
+    from: config.email.from,
+    to: booking.email,
+    subject,
+    html,
+    text: `Your booking ${booking.reference} on ${vars.date} has been cancelled.`,
   });
 
   return true;
@@ -140,14 +163,16 @@ export async function sendPasswordResetEmail(
     return false;
   }
 
+  const salon = await getSalonSettings();
+
   await transport.sendMail({
     from: config.email.from,
     to: email,
-    subject: "Reset your password — Dollhouse Lounge 🌸",
+    subject: `Reset your password — ${salon.businessName} 🌸`,
     html: `
       <div style="font-family: Georgia, serif; max-width: 600px; margin: 0 auto; color: #333;">
         <div style="background: linear-gradient(135deg, #fce4ec, #f8bbd9); padding: 32px; text-align: center; border-radius: 8px 8px 0 0;">
-          <h1 style="color: #c2185b; margin: 0;">Dollhouse Lounge 🌸</h1>
+          <h1 style="color: #c2185b; margin: 0;">${salon.businessName} 🌸</h1>
         </div>
         <div style="padding: 32px; background: #fff; border: 1px solid #f8bbd9;">
           <p>Hi ${firstName},</p>
@@ -161,7 +186,7 @@ export async function sendPasswordResetEmail(
         </div>
       </div>
     `,
-    text: `Reset your Dollhouse Lounge password: ${resetUrl}\n\nThis link expires in 1 hour.`,
+    text: `Reset your ${salon.businessName} password: ${resetUrl}\n\nThis link expires in 1 hour.`,
   });
 
   return true;

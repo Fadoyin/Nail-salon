@@ -4,6 +4,7 @@ import { signUserToken } from "../lib/jwt.js";
 import { AppError } from "../lib/errors.js";
 import { getInitials } from "../utils/initials.js";
 import { createWelcomeNotification } from "./notification.service.js";
+import { createAdminNotification } from "./admin-notification.service.js";
 
 const SALT_ROUNDS = 12;
 
@@ -56,6 +57,13 @@ export async function registerUser(input: {
   });
 
   await createWelcomeNotification(user.id, user.firstName);
+  await createAdminNotification({
+    type: "NEW_CLIENT",
+    title: "New client registered",
+    message: `${user.firstName} ${user.lastName} (${user.email}) created an account`,
+    userId: user.id,
+    linkPath: `/admin?section=clients&id=${user.id}`,
+  });
 
   const token = signUserToken(user.id, user.email);
 

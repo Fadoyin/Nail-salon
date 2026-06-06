@@ -40,6 +40,70 @@ enum NotificationType {
   BOOKING_RESCHEDULED
 }
 
+enum AdminNotificationType {
+  NEW_BOOKING
+  DEPOSIT_CONFIRMED
+  BOOKING_CANCELLED
+  BOOKING_RESCHEDULED
+  NEW_CLIENT
+  LATE_CANCELLATION
+  REFUND_ISSUED
+}
+
+model SalonSettings {
+  id                  String   @id @default("default")
+  businessName        String   @default("Dollhouse Lounge")
+  contactEmail        String   @default("bookings@dollhouselounge.com")
+  depositPercentage   Int      @default(50)
+  cancellationHours   Int      @default(48)
+  bufferMinutes       Int      @default(15)
+  leadTimeHours       Int      @default(24)
+  trustpilotUrl       String   @default("")
+  instagramUrl        String   @default("")
+  tiktokUrl           String   @default("")
+  facebookUrl         String   @default("")
+  logoUrl             String?
+  emailBookingConfirm Boolean  @default(true)
+  emailReminder       Boolean  @default(true)
+  emailReviewRequest  Boolean  @default(true)
+  emailCancellation   Boolean  @default(true)
+  templateBookingConfirmSubject String?
+  templateBookingConfirmBody    String?
+  templateReminderSubject       String?
+  templateReminderBody          String?
+  templateReviewSubject         String?
+  templateReviewBody            String?
+  templateCancellationSubject   String?
+  templateCancellationBody      String?
+  updatedAt           DateTime @updatedAt
+}
+
+model BlockedTimeSlot {
+  id        String   @id @default(cuid())
+  date      DateTime
+  startTime String
+  endTime   String
+  reason    String?
+  createdAt DateTime @default(now())
+
+  @@index([date])
+}
+
+model AdminNotification {
+  id        String                @id @default(cuid())
+  type      AdminNotificationType
+  title     String
+  message   String
+  read      Boolean               @default(false)
+  bookingId String?
+  userId    String?
+  linkPath  String?
+  createdAt DateTime              @default(now())
+
+  @@index([read])
+  @@index([createdAt])
+}
+
 model Admin {
   id           String   @id @default(cuid())
   email        String   @unique
@@ -70,9 +134,10 @@ model User {
   firstName    String
   lastName     String
   phone        String
-  avatarUrl    String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  avatarUrl     String?
+  internalNotes String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   bookings           Booking[]
   notifications      Notification[]
@@ -145,6 +210,8 @@ model Booking {
   email                 String
   phone                 String
   notes                 String?
+  internalNotes         String?
+  isManualBooking       Boolean       @default(false)
 
   appointmentDate       DateTime
   appointmentTime       String        // "10:00"

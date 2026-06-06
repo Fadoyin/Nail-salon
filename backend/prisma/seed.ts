@@ -159,6 +159,20 @@ async function main() {
   const adminPassword = process.env.ADMIN_PASSWORD ?? "changeme123";
   const adminName = process.env.ADMIN_NAME ?? "Salon Owner";
 
+  await prisma.salonSettings.upsert({
+    where: { id: "default" },
+    create: {
+      id: "default",
+      businessName: "Dollhouse Lounge",
+      contactEmail: "bookings@dollhouselounge.com",
+      depositPercentage: 50,
+      cancellationHours: 48,
+      bufferMinutes: 15,
+      leadTimeHours: 24,
+    },
+    update: {},
+  });
+
   const existingAdmin = await prisma.admin.findUnique({ where: { email: adminEmail } });
   if (!existingAdmin) {
     const passwordHash = await bcrypt.hash(adminPassword, 12);

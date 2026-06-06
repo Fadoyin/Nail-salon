@@ -1,6 +1,7 @@
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
+import path from "path";
 import { config } from "./config.js";
 import { errorHandler } from "./lib/errors.js";
 import healthRoutes from "./routes/health.routes.js";
@@ -14,7 +15,8 @@ import webhooksRoutes from "./routes/webhooks.routes.js";
 
 const app = express();
 
-app.use(helmet());
+app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
+app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
 app.use(
   cors({
     origin: config.frontendUrl,

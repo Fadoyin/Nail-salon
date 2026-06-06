@@ -29,7 +29,7 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
     const stored = localStorage.getItem(ADMIN_TOKEN_KEY);
     if (stored) {
       setToken(stored);
-      api.adminGetStats(stored).then(() => {
+      api.adminGetOverview(stored).then(() => {
         // token valid — admin info from login stored separately
         const cached = localStorage.getItem("dl_admin_info");
         if (cached) setAdmin(JSON.parse(cached));
